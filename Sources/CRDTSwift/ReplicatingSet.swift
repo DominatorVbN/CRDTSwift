@@ -27,9 +27,9 @@ public struct ReplicatingSet<T: Hashable> {
         self.currentTimestamp = .init()
     }
     
-    public init(_ elements: [T]) {
+    public init(array: [T]) {
         self = .init()
-        elements.forEach { self.insert($0) }
+        array.forEach { self.insert($0) }
     }
     
     @discardableResult

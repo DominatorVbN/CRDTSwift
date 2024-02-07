@@ -15,8 +15,8 @@ final class ReplicatingSetTests: XCTestCase {
     
     override func setUp() {
         super.setUp()
-        a = .init([1])
-        b = .init([2])
+        a = .init(array: [1])
+        b = .init(array: [2])
     }
     
     func testInitiaCreation() {
@@ -48,7 +48,7 @@ final class ReplicatingSetTests: XCTestCase {
     }
     
     func testAssociativity() {
-        let c = ReplicatingSet<Int>([3])
+        let c = ReplicatingSet<Int>(array: [3])
         let d = a.merged(with: b).merged(with: c)
         let e = d.merged(with: a.merged(with: b))
         XCTAssertEqual(d.values, e.values)

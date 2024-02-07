@@ -9,9 +9,7 @@ import Foundation
 
 public struct LamportTimestamp: Identifiable {
     
-    var clock: UInt64 = 0
-    
-    
+    var clock: UInt64 = 0    
     public var id: UUID
     
     public mutating func tick() {
@@ -37,3 +35,6 @@ extension LamportTimestamp: Comparable {
     }
     
 }
+
+extension LamportTimestamp: Codable {}
+extension LamportTimestamp: Equatable {}

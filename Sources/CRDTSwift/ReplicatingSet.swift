@@ -9,7 +9,7 @@ import Foundation
 
 public struct ReplicatingSet<T: Hashable> {
     
-    private struct Metadata {
+    fileprivate struct Metadata {
         var isDeleted: Bool
         var lamportTimeStamp: LamportTimestamp
         
@@ -97,3 +97,11 @@ extension ReplicatingSet: Replicable {
         return result
     }
 }
+
+
+extension ReplicatingSet: Codable where T: Codable {}
+
+extension ReplicatingSet.Metadata: Codable {}
+extension ReplicatingSet.Metadata: Equatable {}
+
+extension ReplicatingSet: Equatable where T: Equatable {}

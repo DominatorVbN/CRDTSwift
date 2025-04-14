@@ -1,113 +1,149 @@
 //
-//  File.swift
-//  
+//  ReplicatingDictionary.swift
+//
 //
 //  Created by Amit Samant on 2/7/24.
 //
 
 import Foundation
 
-struct ReplicatingDictionary<Key: Hashable, Value> {
+/// A replicating dictionary.
+public struct ReplicatingDictionary<Key, Value> where Key: Hashable {
     
     fileprivate struct ValueContainer {
-        
         var isDeleted: Bool
         var lamportTimestamp: LamportTimestamp
         var value: Value
         
         init(value: Value, lamportTimestamp: LamportTimestamp) {
-            self.value = value
-            self.lamportTimestamp = lamportTimestamp
             self.isDeleted = false
+            self.lamportTimestamp = lamportTimestamp
+            self.value = value
         }
     }
     
-    private var valueContainerByKey: Dictionary<Key, ValueContainer>
+    private var valueContainersByKey: Dictionary<Key, ValueContainer>
     private var currentTimestamp: LamportTimestamp
     
+    private var existingKeyValuePairs: [(key: Key, value: ValueContainer)] {
+        valueContainersByKey.filter({ !$0.value.isDeleted })
+    }
+    
     public var values: [Value] {
-        valueContainerByKey.map { $0.value.value }
+        let values = existingKeyValuePairs.map({ $0.value.value })
+        return values
     }
     
     public var keys: [Key] {
-        valueContainerByKey.map { $0.key }
+        let keys = existingKeyValuePairs.map({ $0.key })
+        return keys
     }
     
-    subscript(_ key: Key) -> Value? {
-        get {
-            guard let valueContainer = valueContainerByKey[key], !valueContainer.isDeleted else {
-                return nil
-            }
-            return valueContainer.value
+    public var dictionary: [Key : Value] {
+        existingKeyValuePairs.reduce(into: [:]) { result, pair in
+            result[pair.key] = pair.value.value
         }
-        set {
+    }
+    
+    public var count: Int {
+        valueContainersByKey.reduce(0) { result, pair in
+            result + (pair.value.isDeleted ? 0 : 1)
+        }
+    }
+        
+    public init() {
+        self.valueContainersByKey = .init()
+        self.currentTimestamp = .init()
+    }
+    
+    public subscript(key: Key) -> Value? {
+        get {
+            guard let container = valueContainersByKey[key], !container.isDeleted else { return nil }
+            return container.value
+        }
+        
+        set(newValue) {
             currentTimestamp.tick()
             if let newValue = newValue {
-                let newContainer = ValueContainer(value: newValue, lamportTimestamp: currentTimestamp)
-                valueContainerByKey[key] = newContainer
-            } else if let oldContainer = valueContainerByKey[key] {
+                let container = ValueContainer(value: newValue, lamportTimestamp: currentTimestamp)
+                valueContainersByKey[key] = container
+            } else if let oldContainer = valueContainersByKey[key] {
                 var newContainer = ValueContainer(value: oldContainer.value, lamportTimestamp: currentTimestamp)
                 newContainer.isDeleted = true
-                valueContainerByKey[key] = newContainer
+                valueContainersByKey[key] = newContainer
             }
         }
     }
-    
-    init() {
-        valueContainerByKey = .init()
-        currentTimestamp = .init()
-    }
-    
-    
 }
 
 extension ReplicatingDictionary: Replicable {
     
-    
-    func merged(with other: ReplicatingDictionary<Key, Value>) -> ReplicatingDictionary<Key, Value> {
-        var resultDictionary = self
-        resultDictionary.valueContainerByKey = other.valueContainerByKey.reduce(into: valueContainerByKey, { partialResult, entry in
-            let firstValueContainer = partialResult[entry.key]
+    public func merged(with other: ReplicatingDictionary) -> ReplicatingDictionary {
+        var result = self
+        result.valueContainersByKey = other.valueContainersByKey.reduce(into: valueContainersByKey) { result, entry in
+            let firstValueContainer = result[entry.key]
             let secondValueContainer = entry.value
             if let firstValueContainer = firstValueContainer {
-                partialResult[entry.key] = firstValueContainer.lamportTimestamp > secondValueContainer.lamportTimestamp ? firstValueContainer : secondValueContainer
+                result[entry.key] = firstValueContainer.lamportTimestamp > secondValueContainer.lamportTimestamp ? firstValueContainer : secondValueContainer
             } else {
-                partialResult[entry.key] = secondValueContainer
+                result[entry.key] = secondValueContainer
             }
-        })
-        resultDictionary.currentTimestamp = max(currentTimestamp, other.currentTimestamp)
-        return resultDictionary
+        }
+        result.currentTimestamp = max(self.currentTimestamp, other.currentTimestamp)
+        return result
     }
-    
     
 }
 
-
 extension ReplicatingDictionary where Value: Replicable {
     
-    func merged(with other: ReplicatingDictionary<Key, Value>) -> ReplicatingDictionary<Key, Value> {
+    /// If the values are themselves Replicable, we don't have to merge values atomically.
+    /// Instead of just choosing one value or the other, we can merge the values themselves. This merge
+    /// method does exactly that.
+    public func merged(with other: ReplicatingDictionary) -> ReplicatingDictionary {
         var haveTicked = false
         var resultDictionary = self
-        resultDictionary.currentTimestamp = max(currentTimestamp, other.currentTimestamp)
-        resultDictionary.valueContainerByKey = other.valueContainerByKey.reduce(into: valueContainerByKey, { partialResult, entry in
-            let firstValueContainer = partialResult[entry.key]
-            let secondValueContainer = entry.value
-            if let firstValueContainer = firstValueContainer {
-                if !firstValueContainer.isDeleted, !secondValueContainer.isDeleted {
+        resultDictionary.currentTimestamp = max(self.currentTimestamp, other.currentTimestamp)
+        resultDictionary.valueContainersByKey = other.valueContainersByKey.reduce(into: valueContainersByKey) { result, entry in
+            let first = result[entry.key]
+            let second = entry.value
+            if let first = first {
+                if !first.isDeleted, !second.isDeleted {
+                    // Merge the values
                     if !haveTicked {
                         resultDictionary.currentTimestamp.tick()
                         haveTicked = true
                     }
-                    let mergedValue = firstValueContainer.value.merged(with: secondValueContainer.value)
-                    partialResult[entry.key] = ValueContainer(value: mergedValue, lamportTimestamp: resultDictionary.currentTimestamp)
+                    let newValue = first.value.merged(with: second.value)
+                    let newValueContainer = ValueContainer(value: newValue, lamportTimestamp: resultDictionary.currentTimestamp)
+                    result[entry.key] = newValueContainer
                 } else {
-                    partialResult[entry.key] = firstValueContainer.lamportTimestamp > secondValueContainer.lamportTimestamp ? firstValueContainer : secondValueContainer
+                    // At least one deletion, so just revert to atomic merge
+                    result[entry.key] = first.lamportTimestamp > second.lamportTimestamp ? first : second
                 }
             } else {
-                partialResult[entry.key] = secondValueContainer
+                result[entry.key] = second
             }
-        })
+        }
         return resultDictionary
     }
     
+}
+
+extension ReplicatingDictionary: Codable where Value: Codable, Key: Codable {
+}
+
+extension ReplicatingDictionary.ValueContainer: Codable where Value: Codable, Key: Codable {
+}
+
+extension ReplicatingDictionary: Equatable where Value: Equatable {
+}
+
+extension ReplicatingDictionary.ValueContainer: Equatable where Value: Equatable {
+}
+
+extension ReplicatingDictionary: Hashable where Value: Hashable {
+}
+
+extension ReplicatingDictionary.ValueContainer: Hashable where Value: Hashable {
 }

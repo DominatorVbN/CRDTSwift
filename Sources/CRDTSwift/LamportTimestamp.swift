@@ -7,34 +7,16 @@
 
 import Foundation
 
-public struct LamportTimestamp: Identifiable {
-    
-    var clock: UInt64 = 0    
-    public var id: UUID
+internal struct LamportTimestamp: Codable, Identifiable, Comparable, Hashable {
+    var count: UInt64 = 0
+    var id: UUID = UUID()
     
     public mutating func tick() {
-        clock += 1
+        count += 1
+        id = UUID()
     }
     
-    public init(clock: UInt64 = 0) {
-        self.id = .init()
-        self.clock = clock
+    static func < (lhs: LamportTimestamp, rhs: LamportTimestamp) -> Bool {
+        (lhs.count, lhs.id.uuidString) < (rhs.count, rhs.id.uuidString)
     }
 }
-
-extension LamportTimestamp: CustomStringConvertible {
-    public var description: String {
-        "LamportTimestamp<\(clock),\(id.uuidString)>"
-    }
-}
-
-
-extension LamportTimestamp: Comparable {    
-    public static func < (lhs: LamportTimestamp, rhs: LamportTimestamp) -> Bool {
-        (lhs.clock, lhs.id.uuidString) < (rhs.clock, rhs.id.uuidString)
-    }
-    
-}
-
-extension LamportTimestamp: Codable {}
-extension LamportTimestamp: Equatable {}
